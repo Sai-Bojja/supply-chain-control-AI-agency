@@ -1,0 +1,7 @@
+streamlit
+pandas
+openai
+python-dotenv
+duckduckgo-search
+graphviz
+plotly
