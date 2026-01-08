@@ -1,24 +1,20 @@
-from typing import Dict, Any
 from .base_agent import Agent
 
-class CommunicationAgent(Agent):
-    def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        logs = []
-        sku_id = context["sku_data"]["SKU_ID"]
-        
-        if context.get("status") == "Risk":
-            summary = (
-                f"**Alert for SKU {sku_id}**\n"
-                f"- **Issue**: {context.get('risk_type')}\n"
-                f"- **Root Cause**: {context.get('root_cause')}\n"
-                f"- **Inventory Action**: {context.get('inventory_action')}\n"
-                f"- **Procurement Action**: {context.get('procurement_action')}"
-            )
-        else:
-            summary = f"SKU {sku_id} is healthy. No actions required."
-            
-        context["final_summary"] = summary
-        logs.append(self.log("Final report generated."))
-        
-        context["logs"].extend(logs)
-        return context
+def communication_instructions(context_variables):
+    return """You are a Communication Agent.
+Your job is to summarize the entire chain of actions taken by the other agents for the user.
+
+1. Review the conversation history (which is implicit in your context).
+2. Summarize:
+   - The initial status (Healthy/Risk).
+   - Any Root Cause identified.
+   - Actions taken (Forecast updates, Transfers, POs).
+3. Provide a 'Final Summary' paragraph that is business-friendly and reassuring.
+"""
+
+communication_agent = Agent(
+    name="Communication Agent",
+    model="gpt-4o",
+    instructions=communication_instructions,
+    tools=[]
+)

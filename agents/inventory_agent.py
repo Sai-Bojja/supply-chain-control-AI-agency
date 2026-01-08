@@ -1,38 +1,30 @@
-from typing import Dict, Any
 from .base_agent import Agent
+from .tools import transfer_inventory
 
-class InventoryAgent(Agent):
-    def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        if context.get("status") != "Risk":
-            return context
-            
-        logs = []
-        
-        # Real Inventory Optimization
-        product_name = context["sku_data"]["Product_Name"]
-        current_loc = context["sku_data"]["Location"]
-        full_inv = context.get("full_inventory", [])
-        
-        logs.append(self.log(f"Checking network inventory for '{product_name}'..."))
-        
-        transfer_option = None
-        for item in full_inv:
-            # Find same product in different location
-            if item["Product_Name"] == product_name and item["Location"] != current_loc:
-                # Check for surplus (Stock > Forecast)
-                surplus = int(item["Current_Stock"]) - int(item["Forecast"])
-                if surplus > 10: # Minimum transfer quantity
-                    transfer_option = item
-                    break
-        
-        if transfer_option:
-            qty_to_transfer = min(50, int(transfer_option["Current_Stock"]) - int(transfer_option["Forecast"]))
-            recommendation = f"Transfer {qty_to_transfer} units from {transfer_option['Location']} (Surplus: {int(transfer_option['Current_Stock']) - int(transfer_option['Forecast'])}). Avoids PO."
-        else:
-            recommendation = "No surplus inventory found in network. Procurement required."
-            
-        context["inventory_action"] = recommendation
-        logs.append(self.log(f"Inventory Action Proposed: {recommendation}"))
-        
-        context["logs"].extend(logs)
-        return context
+def inventory_instructions(context_variables):
+    current_stock = context_variables.get("Current_Stock", 0)
+    forecast = context_variables.get("Forecast", 0)
+    full_inventory = context_variables.get("full_inventory", [])
+    product_name = context_variables.get("Product_Name", "Product")
+    
+    return f"""You are an Inventory Agent.
+Your goal is to resolve stock-out risks by checking if other locations have excess stock of the same product.
+
+Context: 
+- Product: {product_name}
+- Current Stock: {current_stock}
+- Forecast: {forecast}
+- Full Inventory List: {str(full_inventory)[:1000]}... (truncated)
+
+1. If the current stock is sufficient (e.g., > 50% of forecast), do nothing.
+2. If there is a risk, check 'Full Inventory List' for other locations with high stock of '{product_name}'.
+3. If a location has excess stock (e.g., more than double their own forecast or > 100 units surplus), recommend a transfer.
+4. Use 'transfer_inventory' tool to initiate the transfer.
+"""
+
+inventory_agent = Agent(
+    name="Inventory Agent",
+    model="gpt-4o",
+    instructions=inventory_instructions,
+    tools=[transfer_inventory]
+)

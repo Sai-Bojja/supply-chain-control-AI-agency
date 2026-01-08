@@ -1,214 +1,294 @@
 import streamlit as st
 import pandas as pd
 import time
-import graphviz
+import plotly.graph_objects as go
 from core.orchestrator import Orchestrator
+import graphviz
+from datetime import datetime
 
-st.set_page_config(page_title="Supply Chain Control Tower", layout="wide", page_icon="🏢")
+# --- CONFIGURATION ---
+st.set_page_config(
+    page_title="SC-Control | Autonomous Supply Chain",
+    layout="wide",
+    page_icon="🏙️",
+    initial_sidebar_state="expanded"
+)
 
-# Custom CSS for "Production Grade" look
+# --- CUSTOM THEME (CSS) ---
 st.markdown("""
 <style>
-    .reportview-container {
-        background: #f0f2f6;
+    /* Global Theme - "Executive Dark" / Professional */
+    /* .stApp controlled by config.toml now */
+    
+    /* Metrics Cards */
+    div[data-testid="metric-container"] {
+        background-color: #1a1e26; /* Dark slate */
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 5px solid #4e8cff;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }
-    .main-header {
-        font-size: 2.5rem;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
+    
+    /* Headers -> Inherit from theme but ensure weights */
+    h1, h2, h3 {
+        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-weight: 600;
     }
-    .metric-card {
-        background-color: white;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        text-align: center;
-    }
+    h1 { font-size: 2.2rem; margin-bottom: 0px; }
+    
+    /* Sidebar -> Inherit */
+    
+    /* Buttons handled by theme mostly, but keeping custom hover */
     .stButton>button {
-        width: 100%;
-        background-color: #1f77b4;
-        color: white;
+        border-radius: 6px;
+        font-weight: 500;
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1 class='main-header'>🏢 Autonomous Supply Chain Control Tower</h1>", unsafe_allow_html=True)
+# --- HEADER SECTION ---
+col_head_1, col_head_2 = st.columns([1, 4])
+with col_head_1:
+    st.markdown("<div style='font-size: 3rem;'>🏙️</div>", unsafe_allow_html=True)
+with col_head_2:
+    st.markdown("# Autonomous Supply Chain Control Tower")
+    st.markdown("*AI-Driven Demand Planning & Inventory Optimization*")
 
-# Load Data
+st.divider()
+
+# --- DATA LOADER ---
 @st.cache_data
 def load_data():
-    return pd.read_csv("data/inventory_data_real.csv")
+    try:
+        return pd.read_csv("data/inventory_data_real.csv")
+    except FileNotFoundError:
+        st.error("❌ Data source unavailable. Check connection.")
+        return pd.DataFrame()
 
-try:
-    df = load_data()
-except FileNotFoundError:
-    st.error("Data file not found. Please ensure 'data/inventory_data_real.csv' exists.")
+df = load_data()
+if df.empty:
     st.stop()
 
-# Initialize Session State
-if "analysis_result" not in st.session_state:
-    st.session_state["analysis_result"] = None
-if "active_sku" not in st.session_state:
-    st.session_state["active_sku"] = None
-
-# Sidebar
+# --- SIDEBAR ---
 with st.sidebar:
-    st.image("https://img.icons8.com/color/96/000000/artificial-intelligence.png", width=100)
-    st.header("System Controls")
-    selected_sku = st.selectbox("Select SKU to Monitor", df["SKU_ID"].tolist())
+    st.subheader("📍 Control Panel")
+    selected_sku = st.selectbox(
+        "Select Product SKU", 
+        df["SKU_ID"].tolist(),
+        format_func=lambda x: f"{x} - {df[df['SKU_ID']==x]['Product_Name'].values[0]}"
+    )
     
-    # Reset state if SKU changes
-    if selected_sku != st.session_state["active_sku"]:
-        st.session_state["analysis_result"] = None
+    # State Management Logic
+    if "active_sku" not in st.session_state or st.session_state["active_sku"] != selected_sku:
         st.session_state["active_sku"] = selected_sku
-        
+        st.session_state["analysis_result"] = None # Reset analysis on valid SKU switch
+
     st.markdown("---")
-    st.markdown("**Active Agents:**")
-    st.markdown("✅ Monitoring")
-    st.markdown("✅ Forecast")
-    st.markdown("✅ Root Cause (Web Enabled)")
-    st.markdown("✅ Inventory")
-    st.markdown("✅ Procurement")
-    st.markdown("✅ Communication")
+    st.markdown("### 🛠️ Simulation Params")
+    sim_season = st.selectbox("Simulated Season", ["Winter", "Summer", "All Year"], index=0)
+    
+    st.info(f"System Time: {datetime.now().strftime('%H:%M')} EST")
+    st.caption("v2.1.0-Production | OpenAI Agents")
 
-# Dashboard Metrics
+# --- KPI DASHBOARD ---
+sku_data = df[df["SKU_ID"] == selected_sku].iloc[0]
+
+# Metrics Layout
 col1, col2, col3, col4, col5 = st.columns(5)
-selected_data = df[df["SKU_ID"] == selected_sku].iloc[0]
-
-# Product Header
-st.markdown(f"## 📦 {selected_data['Product_Name']}")
-st.markdown(f"**Category:** {selected_data['Category']} | **Location:** {selected_data['Location']} | **Season:** {selected_data.get('Season', 'All Year')}")
-st.markdown("---")
-
 with col1:
-    st.metric("Current Stock", f"{selected_data['Current_Stock']} units")
+    st.metric("Current Stock", f"{sku_data['Current_Stock']:,}", help="Physical inventory on hand")
 with col2:
-    st.metric("Forecast (30 Days)", f"{selected_data['Forecast']} units")
+    fc_delta = int(sku_data['Forecast'] - sku_data['Sales_Trend_Last_30_Days'])
+    st.metric("30-Day Forecast", f"{sku_data['Forecast']:,}", delta=fc_delta, delta_color="inverse")
 with col3:
-    st.metric("On Order", f"{selected_data.get('On_Order', 0)} units")
+    st.metric("Sales Trend (30d)", f"{sku_data['Sales_Trend_Last_30_Days']:,}", "Velocity")
 with col4:
-    st.metric("Past 30 Days Sales", f"{selected_data['Sales_Trend_Last_30_Days']} units", 
-             delta=int(selected_data['Sales_Trend_Last_30_Days'] - selected_data['Forecast']))
+    st.metric("On Order", f"{sku_data.get('On_Order', 0):,}", help="Inbound stock")
 with col5:
-    st.metric("Lead Time", f"{selected_data['Supplier_Lead_Time']} days")
+    coverage = round(sku_data['Current_Stock'] / sku_data['Forecast'], 2) if sku_data['Forecast'] else 0
+    st.metric("Weeks of Supply", f"{coverage * 4} wks", delta="Low Risk" if 0.8 < coverage < 1.5 else "High Risk", delta_color="normal" if 0.8 < coverage < 1.5 else "inverse")
 
-st.markdown("---")
+# --- MAIN CHARTS & AGENT INTERFACE ---
+col_main, col_logs = st.columns([1.8, 1.2])
 
-# Main Execution Area
-col_left, col_right = st.columns([2, 1])
-
-with col_left:
-    st.subheader("📡 Live Agent Network")
-    graph_placeholder = st.empty()
+with col_main:
+    st.subheader("📈 Supply & Demand Intelligence")
     
-    def render_graph(active_agent=None):
-        dot = graphviz.Digraph()
-        dot.attr(rankdir='LR', size='8,5')
-        dot.attr('node', shape='box', style='filled', color='lightgrey')
-        
-        agents = ["Monitoring", "Forecast", "Root Cause", "Inventory", "Procurement", "Communication"]
-        
-        for agent in agents:
-            if agent == active_agent:
-                dot.node(agent, style='filled', fillcolor='#ff9999', color='red')
-            else:
-                dot.node(agent)
-                
-        dot.edge("Monitoring", "Forecast")
-        dot.edge("Forecast", "Root Cause")
-        dot.edge("Root Cause", "Inventory")
-        dot.edge("Inventory", "Procurement")
-        dot.edge("Procurement", "Communication")
-        
-        graph_placeholder.graphviz_chart(dot)
-
-    # Render initial graph
-    render_graph()
-
-    st.subheader("📝 Agent Activity Log")
-    log_container = st.container()
+    # CHART: Plotly Forecast vs Actuals (Simulated history for demo)
+    # In a real app, we'd pull historicals. Here we generate a simple line chart.
+    import numpy as np
     
-    # If we have a result in state, render it
+    # Simulate past 6 months data for the chart
+    months = ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    base_sales = sku_data['Sales_Trend_Last_30_Days']
+    # Add random variance
+    history = [base_sales * (0.8 + 0.1 * i + np.random.normal(0, 0.05)) for i in range(6)]
+    forecast_line = [None] * 5 + [sku_data['Forecast']] # Forecast point
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=months, y=history, mode='lines+markers', name='Sales History', line=dict(color='#4e8cff', width=3)))
+    fig.add_trace(go.Scatter(x=["Dec", "Jan Forecast"], y=[history[-1], sku_data['Forecast']], mode='lines+markers', name='Forecast', line=dict(color='#00cc96', dash='dot')))
+    
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#fafafa'),
+        margin=dict(l=20, r=20, t=20, b=20),
+        xaxis_title="Timeline",
+        yaxis_title="Units",
+        height=300,
+        showlegend=True
+    )
+    st.plotly_chart(fig, width="stretch")
+
+    st.markdown("### 🌐 Agent Network Status")
+    
+    # Reusing the Graphviz visual but cleaner
+    graph = graphviz.Digraph()
+    graph.attr(rankdir='LR', bgcolor='transparent')
+    graph.attr('node', shape='box', style='rounded,filled', fontcolor='white', fillcolor='#262730', color='#4e8cff')
+    graph.attr('edge', color='#888888')
+    
+    # Highlight active path based on logs? For now static map.
+    nodes = ["Monitoring", "Forecast", "RootCause", "Inventory", "Procurement"]
+    for n in nodes:
+        graph.node(n)
+        
+    graph.edge("Monitoring", "Forecast")
+    graph.edge("Forecast", "Inventory", label="Deficit?")
+    graph.edge("Inventory", "RootCause", label="Risk?")
+    graph.edge("Inventory", "Procurement", label="Shortfall")
+    
+    st.graphviz_chart(graph, width="stretch")
+
+with col_logs:
+    st.subheader("📡 Autonomous Resolution")
+    
+    # Action Container
+    action_box = st.container()
+    
+    with action_box:
+        st.markdown(f"""
+        **Context**: SKU {selected_sku} ({sku_data['Product_Name']})  
+        **Issue**: {'⚠️ Stock Risk Deteceted' if coverage < 0.8 else '✅ Healthy'}
+        """)
+        
+        # Fixing the button as well
+        if st.button("RUN DIAGNOSTINC & RESOLVE", type="primary", use_container_width=True):
+            st.session_state["analysis_result"] = None # Clear old
+            
+            # Streaming UI
+            placeholder = st.empty()
+            with placeholder.container():
+                st.info("🔄 Initializing Multi-Agent System...")
+            
+            orchestrator = Orchestrator()
+            
+            # Add simulation params to data
+            run_data = sku_data.to_dict()
+            run_data["Season"] = sim_season
+            
+            with st.spinner("🤖 Agents working..."):
+                result = orchestrator.run(run_data)
+                st.session_state["analysis_result"] = result
+            
+            placeholder.empty()
+
     if st.session_state["analysis_result"]:
-        result = st.session_state["analysis_result"]
-        for log in result["logs"]:
-            with log_container:
-                if "ALERT" in log:
-                    st.error(log)
-                elif "Updating" in log or "Action" in log:
-                    st.warning(log)
-                else:
-                    st.info(log)
-
-with col_right:
-    st.subheader("⚙️ Actions")
-    
-    if st.button("🚀 Initiate Autonomous Resolution", type="primary"):
-        sku_data = selected_data.to_dict()
-        orchestrator = Orchestrator()
-        
-        # Clear previous state
-        st.session_state["analysis_result"] = None
-        log_container.empty()
-        
-        # Custom callback to update UI in real-time
-        def update_ui(agent_name, message):
-            render_graph(agent_name)
-            with log_container:
-                with st.chat_message("assistant", avatar="🤖"):
-                    st.markdown(f"**{agent_name}**: {message}")
-            time.sleep(0.5) # Faster for better UX
-
-        with st.spinner("Orchestrating agents..."):
-            result_context = orchestrator.run(sku_data)
-            
-        # Replay logs for visual effect
-        for log in result_context["logs"]:
-            if "]" in log:
-                agent_name = log.split("]")[0].replace("[", "")
-                message = log.split("]")[1].strip()
+        st.divider()
+        st.markdown("#### 📧 Email Report")
+        email_addr = st.text_input("Recipient Email", placeholder="manager@example.com")
+        if st.button("Send Summary", type="secondary", use_container_width=True):
+            if not email_addr:
+                st.error("Please enter an email address.")
             else:
-                agent_name = "System"
-                message = log
-            update_ui(agent_name, message)
-            
-        render_graph(None)
-        
-        # Save result to state
-        st.session_state["analysis_result"] = result_context
-        st.success("Workflow Completed. Data Updated.")
-        time.sleep(1)
-        st.rerun() # Rerun to update top metrics, but state will preserve logs
+                from agents.email_agent import email_agent
+                
+                # Context for Email Agent
+                results = st.session_state["analysis_result"]
+                email_ctx = {
+                    "summary": results.get("final_summary", ""),
+                    "logs": results.get("logs", []),
+                    "user_email": email_addr
+                }
+                
+                with st.spinner("Generating and Sending Email..."):
+                    orch = Orchestrator()
+                    email_status = orch.run_agent_ad_hoc(email_agent, email_ctx)
+                
+                if "Error" in email_status or "Failed" in email_status:
+                    st.error(email_status)
+                else:
+                    st.success(email_status)
 
-    # Display Final Summary & Changes if available
+    st.divider()
+    
+    # Live Feed / Results
     if st.session_state["analysis_result"]:
         res = st.session_state["analysis_result"]
         
-        st.markdown("### 📋 Executive Summary")
-        st.info(res.get("final_summary", "No summary."))
+        # --- PROPOSED ACTIONS & APPROVAL ---
+        # identify pending actions
+        actions = {}
+        if res.get("new_forecast"): actions["Update Forecast"] = f"New Value: {res['new_forecast']}"
+        if res.get("po_qty"): actions["Create PO"] = f"Qty: {res['po_qty']} units"
+        if res.get("transfer_qty"): actions["Transfer Stock"] = f"Qty: {res['transfer_qty']} units"
         
-        st.markdown("### 📊 Data Updates Applied")
+        # Only show approval if there are actions AND they haven't been processed yet
+        if actions:
+            st.info("✋ **Human Approval Required**")
+            
+            # Show diff
+            act_df = pd.DataFrame(list(actions.items()), columns=["Action", "Details"])
+            st.table(act_df)
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ Approve & Execute Changes", use_container_width=True):
+                    # EXECUTE
+                    orch = Orchestrator()
+                    status_msg = orch.persist_changes(sku_data["SKU_ID"], res)
+                    st.success(status_msg)
+                    time.sleep(1) 
+                    st.rerun()
+            with c2:
+                if st.button("❌ Reject Proposed Actions", use_container_width=True):
+                    st.warning("Actions Rejected. No changes made.")
+                    # Optionally clear state or just leave it
+                    
+        # --- STATUS BAR ---
+        status = res.get("status", "Healthy")
+        risk_type = res.get("risk_type", "None")
         
-        # Calculate Deltas
-        old_forecast = selected_data['Forecast'] # Note: This might be the NEW value if we reran. 
-        # To show true delta, we'd need to capture 'before' state. 
-        # But since we reran, 'selected_data' is now the UPDATED data.
-        # So we can just show the Current Values as "New State".
+        if status == "Risk":
+            if "Stock-out" in risk_type:
+               st.error(f"🚨 **CRITICAL STATUS: {risk_type.upper()}** - IMMEDIATE ACTION REQUIRED")
+            else:
+               st.warning(f"⚠️ **STATUS: {risk_type.upper()}** - MONITORING")
+        else:
+            st.success("✅ **STATUS: OPTIMAL** - SUPPLY CHAIN IS HEALTHY")
+        # ------------------
         
-        st.write("**New System State:**")
-        st.write(f"- **Forecast**: {res.get('new_forecast', 'Unchanged')}")
-        st.write(f"- **On Order**: {res.get('sku_data', {}).get('On_Order', 'Unchanged')}") # This comes from context, might be old if not updated in context object
+        with st.expander("🔍 Executive Summary", expanded=True):
+            st.markdown(res.get("final_summary", "No summary available."))
+            
+        # Action Log Timeline
+        st.subheader("📜 Execution Trace")
+        logs = res.get("logs", [])
         
-        # Better: Show what the agents *decided*
-        if res.get("new_forecast"):
-             st.write(f"✅ **Forecast Updated**: -> {res['new_forecast']}")
-        
-        proc_action = res.get("procurement_action") or ""
-        if "Create PO" in proc_action:
-             st.write(f"✅ **Procurement**: {proc_action}")
-             
-        inv_action = res.get("inventory_action") or ""
-        if "Transfer" in inv_action:
-             st.write(f"✅ **Inventory**: {inv_action}")
-
+        for log in logs:
+            if "Tool" in log:
+                 st.markdown(f"🛠️ `{log}`")
+            elif "Error" in log:
+                st.error(log)
+            elif "[" in log:
+                # Format: [AgentName] Message
+                parts = log.split("]", 1)
+                agent = parts[0].replace("[", "")
+                msg = parts[1]
+                st.markdown(f"**{agent}**: {msg}")
+            else:
+                st.info(log)
+                
+    else:
+        st.info("👆 Click 'Run' to start the autonomous agents.")

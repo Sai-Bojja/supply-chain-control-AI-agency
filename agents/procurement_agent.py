@@ -1,29 +1,20 @@
-from typing import Dict, Any
 from .base_agent import Agent
+from .tools import create_po
 
-class ProcurementAgent(Agent):
-    def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        if context.get("status") != "Risk":
-            return context
-            
-        logs = []
-        new_forecast = context.get("new_forecast", context["sku_data"]["Forecast"])
-        current_stock = int(context["sku_data"]["Current_Stock"])
-        lead_time = int(context["sku_data"]["Supplier_Lead_Time"])
-        
-        # Simple PO calculation
-        # Needed = Forecast - (Current_Stock + On_Order)
-        on_order = int(context["sku_data"].get("On_Order", 0))
-        needed = new_forecast - (current_stock + on_order)
-        
-        if needed > 0:
-            po_qty = needed + int(needed * 0.2) # Safety buffer
-            action = f"Create PO for {po_qty} units. Lead time: {lead_time} days. (On Order: {on_order})"
-        else:
-            action = "No immediate procurement needed."
-            
-        context["procurement_action"] = action
-        logs.append(self.log(f"Procurement Action: {action}"))
-        
-        context["logs"].extend(logs)
-        return context
+def procurement_instructions(context_variables):
+    return """You are a Procurement Agent.
+Your job is to ensure long-term stock availability if transfers are not enough.
+
+1. Check if the Inventory Agent successfully initiated a transfer.
+2. If stock is still critically low or no transfer was possible, calculate the deficit.
+3. Deficit = Forecast - (Current Stock + On Order).
+4. If Deficit > 0, generate a Purchase Order (PO) for the deficit amount + 20% safety stock.
+5. Use 'create_po' tool to place the order.
+"""
+
+procurement_agent = Agent(
+    name="Procurement Agent",
+    model="gpt-4o",
+    instructions=procurement_instructions,
+    tools=[create_po]
+)
